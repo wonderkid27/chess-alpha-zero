@@ -15,13 +15,13 @@ class PlayDataConfig:
     def __init__(self):
         self.nb_game_in_file = 100
         self.max_file_num = 5000
-        self.max_rein_games = 100
+        self.max_rein_games = 500
         self.max_rein_files = 1
 
 
 class PlayConfig:
     def __init__(self):
-        self.simulation_num_per_move = 20
+        self.simulation_num_per_move = 800
         self.thinking_loop = 1
         self.logging_thinking = True # False
         self.c_puct = 5
