@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from logging import getLogger
-from time import time, sleep
+from time import time
 import chess.pgn
 import re
 from chess_zero.agent.player_chess import ChessPlayer
@@ -19,7 +19,7 @@ TAG_REGEX = re.compile(r"^\[([A-Za-z0-9_]+)\s+\"(.*)\"\]\s*$")
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.1)
+    tf_util.set_session_config(per_process_gpu_memory_fraction=1)
     return SupervisedLearningWorker(config, env=ChessEnv()).start()
 
 
@@ -134,7 +134,6 @@ class SupervisedLearningWorker:
         logger.info(f"save play data to {path}")
         write_game_data_to_file(path, self.buffer)
         self.buffer = []
-        sleep(600)
 
     def remove_play_data(self):
         files = get_game_data_filenames(self.config.resource)

@@ -17,6 +17,7 @@ class ChessEnv:
         self.done = False
         self.winner = None  # type: Winner
         self.resigned = False
+        self.result = None
 
     def reset(self):
         self.board = chess.Board()
@@ -34,7 +35,11 @@ class ChessEnv:
         self.resigned = False
         return self
 
-    def step(self, action, check_over=True):
+    def step(self, action, check_over = True):
+        """
+        :param int|None action, None is resign
+        :return:
+        """
         if check_over and action is None:
             self._resigned()
             return self.board, {}
@@ -43,7 +48,7 @@ class ChessEnv:
 
         self.turn += 1
 
-        if check_over and (self.board.is_game_over() or self.board.can_claim_threefold_repetition()):
+        if check_over and self.board.is_game_over() or self.turn == 80:
             self._game_over()
 
         return self.board, {}
@@ -51,19 +56,22 @@ class ChessEnv:
     def _game_over(self):
         self.done = True
         if self.winner is None:
-            result = self.board.result()
-            if result == '1-0':
+            self.result = self.board.result()
+            if self.result == '1-0':
                 self.winner = Winner.white
-            elif result == '0-1':
+            elif self.result == '0-1':
                 self.winner = Winner.black
             else:
                 val_black, val_white = self.score_board()
                 if val_black > val_white:
                     self.winner = Winner.black
+                    self.result = '0-1'
                 elif val_black < val_white:
                     self.winner = Winner.white
+                    self.result = '1-0'
                 else:
                     self.winner = Winner.draw
+                    self.result = '1/2-1/2'
 
     def score_current(self):
         val_black, val_white = self.score_board()
@@ -76,30 +84,30 @@ class ChessEnv:
         board_state = self.replace_tags()
         pieces_white = [val if val.isupper() and val != "1" else 0 for val in board_state.split(" ")[0]]
         pieces_black = [val if val.islower() and val != "1" else 0 for val in board_state.split(" ")[0]]
-        val_white = 0.0
-        val_black = 0.0
+        val_white = 0.00
+        val_black = 0.00
         for piece in pieces_white:
             if piece == 'Q':
-                val_white += 10.0
+                val_white += 9.00
             elif piece == 'R':
-                val_white += 5.5
+                val_white += 5.00
             elif piece == 'B':
-                val_white += 3.5
+                val_white += 3.75
             elif piece == 'N':
-                val_white += 3
+                val_white += 3.50
             elif piece == 'P':
-                val_white += 1
+                val_white += 1.00
         for piece in pieces_black:
             if piece == 'q':
-                val_black += 10.0
+                val_black += 9.00
             elif piece == 'r':
-                val_black += 5.5
+                val_black += 5.00
             elif piece == 'b':
-                val_black += 3.5
+                val_black += 3.75
             elif piece == 'n':
-                val_black += 3
+                val_black += 3.50
             elif piece == 'p':
-                val_black += 1
+                val_black += 1.00
         return val_black, val_white
 
 

@@ -7,16 +7,11 @@ from chess_zero.agent.player_chess import ChessPlayer
 from chess_zero.config import Config
 from chess_zero.env.chess_env import ChessEnv, Winner
 from chess_zero.lib import tf_util
-from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file
+from chess_zero.lib.data_helper import get_game_data_filenames, write_game_data_to_file, pretty_print
 from chess_zero.lib.model_helper import load_best_model_weight, save_as_best_model, \
     reload_best_model_weight_if_changed
 
 logger = getLogger(__name__)
-
-
-def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=1)
-    return SelfPlayWorker(config, env=ChessEnv()).start()
 
 
 class SelfPlayWorker:
@@ -41,14 +36,13 @@ class SelfPlayWorker:
         self.buffer = []
         idx = 1
 
-        while True:
+        while idx < self.config.play_data.max_rein_games + 1:
             start_time = time()
             env = self.start_game(idx)
             end_time = time()
             logger.debug(f"game {idx} time={end_time - start_time} sec, "
                          f"turn={int(env.turn/2)}:{env.observation} - Winner:{env.winner} - by resignation?:{env.resigned}")
-            if (idx % self.config.play_data.nb_game_in_file) == 0:
-                reload_best_model_weight_if_changed(self.model)
+            pretty_print(env, ("current_model", "current_model"))
             idx += 1
 
     def start_game(self, idx):
@@ -64,7 +58,7 @@ class SelfPlayWorker:
             board, info = self.env.step(action)
             observation = board.fen()
         self.finish_game()
-        self.save_play_data(write=idx % self.config.play_data.nb_game_in_file == 0)
+        self.save_play_data(write=idx % self.config.play_data.max_rein_games == 0)
         self.remove_play_data()
         return self.env
 
@@ -84,9 +78,9 @@ class SelfPlayWorker:
 
     def remove_play_data(self):
         files = get_game_data_filenames(self.config.resource)
-        if len(files) < self.config.play_data.max_file_num:
+        if len(files) < self.config.play_data.max_rein_files:
             return
-        for i in range(len(files) - self.config.play_data.max_file_num):
+        for i in range(len(files) - self.config.play_data.max_rein_files):
             os.remove(files[i])
 
     def finish_game(self):

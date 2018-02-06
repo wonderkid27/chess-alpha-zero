@@ -7,7 +7,7 @@ from .config import Config
 
 logger = getLogger(__name__)
 
-CMD_LIST = ['self', 'opt', 'eval', 'play_gui', 'sl', 'uci']
+CMD_LIST = ['self', 'opt', 'eval', 'play_gui', 'sl', 'uci', 'rein']
 
 
 def create_parser():
@@ -49,6 +49,9 @@ def start():
     elif args.cmd == 'eval':
         from .worker import evaluate
         return evaluate.start(config)
+    elif args.cmd == 'rein':
+        from .worker import reinforcement
+        return reinforcement.start(config)
     elif args.cmd == 'sl':
         from .worker import sl
         return sl.start(config)

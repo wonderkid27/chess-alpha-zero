@@ -7,9 +7,11 @@ from logging import getLogger
 # noinspection PyPep8Naming
 import keras.backend as k
 
+from keras import layers
 from keras.engine.topology import Input
 from keras.engine.training import Model
-from keras.layers.convolutional import Conv2D
+from keras.layers.convolutional import Conv2D, SeparableConv2D, MaxPooling2D
+from keras.layers import GlobalAveragePooling2D, GlobalMaxPooling2D
 from keras.layers.core import Activation, Dense, Flatten
 from keras.layers.merge import Add
 from keras.layers.normalization import BatchNormalization
@@ -26,48 +28,57 @@ class ChessModel:
         self.config = config
         self.model = None  # type: Model
         self.digest = None
+        self.policy_out = None
+        self.value_out = None
+        #self.net_params = get_policy_param()
 
     def build(self):
         mc = self.config.model
         in_x = x = Input((2, 8, 8))  # [own(8x8), enemy(8x8)]
 
         # (batch, channels, height, width)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding='same',
+                   kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(momentum=.997, epsilon=1e-5)(x)
-        x = Activation("relu")(x)
+        x = Activation('relu')(x)
 
-        for _ in range(mc.res_layer_num):
+        for i in range(mc.res_layer_num):
             x = self._build_residual_block(x)
 
         res_out = x
         # for policy output
         x = Conv2D(filters=2, kernel_size=1, kernel_regularizer=l2(mc.l2_reg))(res_out)
         x = BatchNormalization(momentum=.997, epsilon=1e-5)(x)
-        x = Activation("relu")(x)
+        x = Activation('relu')(x)
         x = Flatten()(x)
-        # no output for 'pass'
-        policy_out = Dense(self.config.n_labels, kernel_regularizer=l2(mc.l2_reg), activation="softmax", name="policy_out")(x)
+        policy_out = Dense(self.config.n_labels, activation='softmax', name='policy_out',
+                           kernel_regularizer=l2(mc.l2_reg))(x)
+        #self.value_out = Dense(1, activation='tanh', name='self.value_out')(x)
 
         # for value output
         x = Conv2D(filters=1, kernel_size=1, kernel_regularizer=l2(mc.l2_reg))(res_out)
         x = BatchNormalization(momentum=.997, epsilon=1e-5)(x)
-        x = Activation("relu")(x)
+        x = Activation('relu')(x)
         x = Flatten()(x)
-        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg), activation="relu")(x)
-        value_out = Dense(1, kernel_regularizer=l2(mc.l2_reg), activation="tanh", name="value_out")(x)
+        x = Dense(mc.value_fc_size, kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Activation('relu')(x)
+        value_out = Dense(1, activation='tanh', name='value_out', kernel_regularizer=l2(mc.l2_reg))(x)
 
         self.model = Model(in_x, [policy_out, value_out], name="chess_model")
 
     def _build_residual_block(self, x):
         mc = self.config.model
         in_x = x
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", kernel_regularizer=l2(mc.l2_reg))(x)
+
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding='same',
+                   kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(momentum=.997, epsilon=1e-5)(x)
-        x = Activation("relu")(x)
-        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding="same", kernel_regularizer=l2(mc.l2_reg))(x)
+        x = Activation('relu')(x)
+        x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_filter_size, padding='same',
+                   kernel_regularizer=l2(mc.l2_reg))(x)
         x = BatchNormalization(momentum=.997, epsilon=1e-5)(x)
         x = Add()([x, in_x])
-        x = Activation("relu")(x)
+        x = Activation('relu')(x)
         return x
 
     @staticmethod
@@ -142,3 +153,6 @@ def objective_function_for_policy(y_true, y_pred):
 
 def objective_function_for_value(y_true, y_pred):
     return mean_squared_error(y_true, y_pred)
+
+def log_loss(y_true, y_pred):
+    return k.sum(-y_true * k.log(y_pred), axis=-1)

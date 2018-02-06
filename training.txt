@@ -1,0 +1,2 @@
+resnet3 - 100 simu - final_score() - draw = true
+

@@ -15,7 +15,7 @@ logger = getLogger(__name__)
 
 
 def start(config: Config):
-    tf_util.set_session_config(per_process_gpu_memory_fraction=0.2)
+    tf_util.set_session_config(per_process_gpu_memory_fraction=1)
     return EvaluateWorker(config).start()
 
 
@@ -44,20 +44,22 @@ class EvaluateWorker:
     def evaluate_model(self, ng_model):
         results = []
         winning_rate = 0
-        for game_idx in range(self.config.eval.game_num):
+        game_idx = 0
+        while game_idx < self.config.eval.game_num:
             # ng_win := if ng_model win -> 1, lose -> 0, draw -> None
             ng_win, white_is_best = self.play_game(self.best_model, ng_model)
             if ng_win is not None:
+                game_idx += 1
                 results.append(ng_win)
                 winning_rate = sum(results) / len(results)
-            logger.debug(f"game {game_idx}: ng_win={ng_win} white_is_best_model={white_is_best} "
+                logger.debug(f"game {game_idx}: ng_win={ng_win} white_is_best_model={white_is_best} "
                          f"winning rate {winning_rate*100:.1f}%")
-            if results.count(0) >= self.config.eval.game_num * (1-self.config.eval.replace_rate):
-                logger.debug(f"lose count reach {results.count(0)} so give up challenge")
-                break
-            if results.count(1) >= self.config.eval.game_num * self.config.eval.replace_rate:
-                logger.debug(f"win count reach {results.count(1)} so change best model")
-                break
+                if results.count(0) >= self.config.eval.game_num * (1-self.config.eval.replace_rate):
+                    logger.debug(f"lose count reach {results.count(0)} so give up challenge")
+                    break
+                if results.count(1) >= self.config.eval.game_num * self.config.eval.replace_rate:
+                    logger.debug(f"win count reach {results.count(1)} so change best model")
+                    break
 
         winning_rate = sum(results) / len(results)
         logger.debug(f"winning rate {winning_rate*100:.1f}%")

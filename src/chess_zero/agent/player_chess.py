@@ -75,8 +75,8 @@ class ChessPlayer:
 
         for tl in range(self.play_config.thinking_loop):
             if tl > 0 and self.play_config.logging_thinking:
-                logger.debug(f"continue thinking: policy move=({action}, "
-                             f"value move=({action_by_value})")
+                logger.debug(f"continue thinking: policy move=({action % 8}, {action // 8}), "
+                             f"value move=({action_by_value % 8}, {action_by_value // 8})")
             self.search_moves(board)
             policy = self.calc_policy(board)
             action = int(np.random.choice(range(self.labels_n), p=policy))
@@ -151,7 +151,7 @@ class ChessPlayer:
             if env.board.turn == chess.WHITE:
                 return leaf_v  # Value for white
             else:
-                return -leaf_v  # Value for white == -Value for white
+                return -leaf_v  # Value for black == -Value for white
 
         action_t = self.select_action_q_and_u(env, is_root_node)
 
@@ -268,7 +268,7 @@ class ChessPlayer:
 
         if is_root_node:  # Is it correct?? -> (1-e)p + e*Dir(0.03)
             p_ = (1 - self.play_config.noise_eps) * p_ + \
-                 self.play_config.noise_eps * np.random.dirichlet([self.play_config.dirichlet_alpha] * self.labels_n)
+                 self.play_config.noise_eps * np.random.dirichlet([self.play_config.dirichlet_alpha] * p_.size) # self.labels_n
 
         u_ = self.play_config.c_puct * p_ * xx_ / (1 + self.var_n[key])
         if env.board.turn == chess.WHITE:

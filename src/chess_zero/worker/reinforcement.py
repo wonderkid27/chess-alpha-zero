@@ -4,12 +4,12 @@ from logging import getLogger
 from time import sleep
 
 import json
-from sklearn.cross_validation import KFold
+#from sklearn.cross_validation import KFold
 
 import keras.backend as k
 import numpy as np
 from keras.optimizers import SGD
-from keras.callbacks import ModelCheckpoint, Callback
+from keras.callbacks import ModelCheckpoint, Callback, EarlyStopping
 
 from chess_zero.agent.model_chess import ChessModel, objective_function_for_policy, \
     objective_function_for_value, log_loss
@@ -17,9 +17,12 @@ from chess_zero.config import Config
 from chess_zero.lib import tf_util
 from chess_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file, \
     get_next_generation_model_dirs
-from chess_zero.lib.model_helper import load_best_model_weight
+from chess_zero.lib.model_helper import load_best_model_weight, save_as_best_model, reload_best_model_weight_if_changed
 from chess_zero.env.chess_env import ChessEnv
+from chess_zero.worker.self import SelfPlayWorker
+from chess_zero.worker.eval import EvaluateWorker
 import chess
+#import pickle as pickle
 
 logger = getLogger(__name__)
 
@@ -37,30 +40,20 @@ class OptimizeWorker(Callback):
         self.loaded_data = {}
         self.dataset = None
         self.optimizer = None
+        self.validation = 0.05
         self.file = config
         self.metadata = {
-            "total_epochs": 0,
-            "best_model" : 1,
-            "best_epoch": 0,
-            "epochs": []
+            "total_games": 17
         }
 
     def on_epoch_end(self, epoch, logs={}):
         # in case appending to logs (resuming training), get epoch number ourselves
-        epoch = len(self.metadata["epochs"])
-        self.metadata["epochs"].append(logs)
 
-        if "val_loss" in logs:
-            key = "val_loss"
+        if self.metadata["total_games"] == 0:
+            self.metadata["total_games"] = 1
         else:
-            key = "loss"
-
-        best_loss = self.metadata["epochs"][self.metadata["best_epoch"]][key]
-        if logs.get(key) < best_loss:
-            self.metadata["best_epoch"] = epoch
-            self.metadata["best_model"] = epoch + 1
-
-        self.metadata["total_epochs"] += 1
+            if epoch < 1:
+                self.metadata["total_games"] += 1
 
         with open(self.file, "w") as f:
             json.dump(self.metadata, f, indent=2)
@@ -70,27 +63,43 @@ class OptimizeWorker(Callback):
         self.training()
 
     def training(self):
-        self.compile_model()
+        tc = self.config.trainer
         last_load_data_step = last_save_step = total_steps = self.config.trainer.start_total_steps
-        self.load_play_data()
 
         meta_dir = 'data/model'
         meta_file = os.path.join(meta_dir, 'metadata.json')
+        file_dir = 'data/model/next_generation'
+        h5_file = os.path.join(file_dir, 'weights.{epoch:02d}.h5')
         self.meta_writer = OptimizeWorker(meta_file)
+        self.early_stopping = EarlyStopping(monitor='val_loss')
+        self.check_point = ModelCheckpoint(filepath=h5_file,monitor='val_loss', verbose=1)
 
         while True:
+            self.load_play_data()
+
+            if (self.dataset_size * (1 - self.validation)) < tc.batch_size:
+                while (self.dataset_size * (1 - self.validation)) < tc.batch_size:
+                    self_play = SelfPlayWorker(self.config, env=ChessEnv(), model=self.model)
+                    self_play.start()
+                    self.load_play_data()
+            else:
+                self_play = SelfPlayWorker(self.config, env=ChessEnv(), model=self.model)
+                self_play.start()
+                self.load_play_data()
+
+            self.compile_model()
+
             self.update_learning_rate(total_steps)
             steps = self.train_epoch(self.config.trainer.epoch_to_checkpoint)
             total_steps += steps
-            if last_save_step + self.config.trainer.save_model_steps < total_steps:
+            if True:
                 self.save_current_model()
                 last_save_step = total_steps
 
-            if last_load_data_step + self.config.trainer.load_data_steps < total_steps:
-                self.load_play_data()
-                last_load_data_step = total_steps
-
-            #k.clear_session()
+            #net_params = ChessModel(self.config).get_policy_param()
+            #pickle.dump(net_params, open('current_policy.model', 'wb'), pickle.HIGHEST_PROTOCOL)
+            k.clear_session()
+            load_best_model_weight(self.model)
 
     def train_epoch(self, epochs):
         tc = self.config.trainer
@@ -104,14 +113,14 @@ class OptimizeWorker(Callback):
                              batch_size=tc.batch_size,
                              epochs=epochs,
                              shuffle=True,
-                             callbacks=[self.meta_writer],
-                             validation_split=0.05)
-        steps = (state_ary.shape[0] // tc.batch_size) * epochs
+                             validation_split=self.validation,
+                             callbacks=[self.meta_writer, self.early_stopping, self.check_point])
+        steps = (state_ary.shape[0] // tc.batch_size)
         return steps
 
     def compile_model(self):
         self.optimizer = SGD(momentum=0.9)
-        losses = [log_loss, 'mean_squared_error']
+        losses = ['categorical_crossentropy', 'mean_squared_error']
         self.model.model.compile(optimizer=self.optimizer, loss=losses)
 
     def update_learning_rate(self, total_steps):
@@ -132,13 +141,7 @@ class OptimizeWorker(Callback):
         logger.debug(f"total step={total_steps}, set learning rate to {lr}")
 
     def save_current_model(self):
-        rc = self.config.resource
-        model_id = datetime.now().strftime("%Y%m%d-%H%M%S.%f")
-        model_dir = os.path.join(rc.next_generation_model_dir, rc.next_generation_model_dirname_tmpl % model_id)
-        os.makedirs(model_dir, exist_ok=True)
-        config_path = os.path.join(model_dir, rc.next_generation_model_config_filename)
-        weight_path = os.path.join(model_dir, rc.next_generation_model_weight_filename)
-        self.model.save(config_path, weight_path)
+        self.model.save(self.model.config.resource.model_best_config_path, self.model.config.resource.model_best_weight_path)
 
     def collect_all_loaded_data(self):
         state_ary_list, policy_ary_list, z_ary_list = [], [], []
@@ -161,23 +164,14 @@ class OptimizeWorker(Callback):
     def load_model(self):
         from chess_zero.agent.model_chess import ChessModel
         model = ChessModel(self.config)
-        rc = self.config.resource
-
-        dirs = get_next_generation_model_dirs(rc)
-        if not dirs:
-            logger.debug(f"loading best model")
-            if not load_best_model_weight(model):
-                raise RuntimeError(f"Best model can not loaded!")
-        else:
-            latest_dir = dirs[-1]
-            logger.debug(f"loading latest model")
-            config_path = os.path.join(latest_dir, rc.next_generation_model_config_filename)
-            weight_path = os.path.join(latest_dir, rc.next_generation_model_weight_filename)
-            model.load(config_path, weight_path)
+        if self.config.opts.new or not load_best_model_weight(model):
+            model.build()
+            save_as_best_model(model)
         return model
 
     def load_play_data(self):
         filenames = get_game_data_filenames(self.config.resource)
+        self.files = len(filenames)
         updated = False
         for filename in filenames:
             if filename in self.loaded_filenames:
